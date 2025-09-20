@@ -14,4 +14,4 @@ I'm trying to learn how to serialize and deserialize rust netlink messages with 
      2) `HOTNESS(u32)`
      3) `PERSON_NAME(String)`
 
-3) Recreate the dump_addresses function in netlink-packet-route yourself without referencing that crate.
+3) Create a conntrack message to list connections.
