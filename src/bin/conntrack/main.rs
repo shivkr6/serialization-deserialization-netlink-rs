@@ -141,19 +141,23 @@ impl From<NetfilterMessage> for NetlinkPayload<NetfilterMessage> {
 #[derive(PartialEq, Debug)]
 pub enum ConntrackAttribute {
     CtaTupleOrig(Vec<Tuple>),
+    CtaProtoInfo(Vec<ProtoInfo>),
 }
 const CTA_TUPLE_ORIG: u16 = 1;
+const CTA_PROTOINFO: u16 = 4;
 
 impl Nla for ConntrackAttribute {
     fn value_len(&self) -> usize {
         match self {
             Self::CtaTupleOrig(nlas) => nlas.iter().map(|op| op.buffer_len()).sum(),
+            Self::CtaProtoInfo(nlas) => nlas.iter().map(|op| op.buffer_len()).sum(),
         }
     }
 
     fn kind(&self) -> u16 {
         match self {
             Self::CtaTupleOrig(_) => CTA_TUPLE_ORIG,
+            Self::CtaProtoInfo(_) => CTA_PROTOINFO,
         }
     }
 
@@ -166,10 +170,20 @@ impl Nla for ConntrackAttribute {
                     len += op.buffer_len();
                 }
             }
+            Self::CtaProtoInfo(nlas) => {
+                let mut len = 0;
+                for op in nlas {
+                    op.emit(&mut buffer[len..]);
+                    len += op.buffer_len();
+                }
+            }
         }
     }
     fn is_nested(&self) -> bool {
-        matches!(self, ConntrackAttribute::CtaTupleOrig(_))
+        matches!(
+            self,
+            ConntrackAttribute::CtaTupleOrig(_) | ConntrackAttribute::CtaProtoInfo(_)
+        )
     }
 }
 
@@ -185,6 +199,15 @@ impl<'a, T: AsRef<[u8]> + ?Sized> Parseable<NlaBuffer<&'a T>> for ConntrackAttri
                     tuples.push(Tuple::parse(nlas)?);
                 }
                 ConntrackAttribute::CtaTupleOrig(tuples)
+            }
+            CTA_PROTOINFO => {
+                let error_msg = "failed to parse CTA_PROTOINFO";
+                let mut protoinfos = Vec::new();
+                for nlas in NlasIterator::new(payload) {
+                    let nlas = &nlas.context(error_msg)?;
+                    protoinfos.push(ProtoInfo::parse(nlas)?);
+                }
+                ConntrackAttribute::CtaProtoInfo(protoinfos)
             }
             kind => return Err(DecodeError::from(format!("invalid NLA kind: {}", kind))),
         })
@@ -400,6 +423,136 @@ impl<'a, T: AsRef<[u8]> + ?Sized> Parseable<NlaBuffer<&'a T>> for ProtoTuple {
 }
 // -----------ProtoTuple stuff ends-----------------------
 
+// -----------ProtoInfo stuff starts---------------------
+pub const CTA_PROTOINFO_TCP: u16 = 1;
+#[derive(PartialEq, Debug)]
+pub enum ProtoInfo {
+    TCP(Vec<ProtoInfoTCP>),
+}
+impl Nla for ProtoInfo {
+    fn value_len(&self) -> usize {
+        match self {
+            ProtoInfo::TCP(nlas) => nlas.iter().map(|op| op.buffer_len()).sum(),
+        }
+    }
+
+    fn kind(&self) -> u16 {
+        match self {
+            ProtoInfo::TCP(_) => CTA_PROTOINFO_TCP,
+        }
+    }
+    fn emit_value(&self, buffer: &mut [u8]) {
+        match self {
+            ProtoInfo::TCP(nlas) => {
+                let mut len = 0;
+                for op in nlas {
+                    op.emit(&mut buffer[len..]);
+                    len += op.buffer_len();
+                }
+            }
+        }
+    }
+    fn is_nested(&self) -> bool {
+        matches!(self, ProtoInfo::TCP(_))
+    }
+}
+impl<'a, T: AsRef<[u8]> + ?Sized> Parseable<NlaBuffer<&'a T>> for ProtoInfo {
+    fn parse(buf: &NlaBuffer<&'a T>) -> Result<Self, DecodeError> {
+        let payload = buf.value();
+
+        Ok(match buf.kind() {
+            CTA_PROTOINFO_TCP => {
+                let error_msg = "failed to parse CTA_PROTOINFO_TCP";
+                let mut proto_info_tcp_s = Vec::new();
+                for nlas in NlasIterator::new(payload) {
+                    let nlas = &nlas.context(error_msg)?;
+                    proto_info_tcp_s.push(ProtoInfoTCP::parse(nlas)?);
+                }
+                ProtoInfo::TCP(proto_info_tcp_s)
+            }
+            kind => return Err(DecodeError::from(format!("invalid NLA kind: {}", kind))),
+        })
+    }
+}
+// -----------ProtoInfo stuff ends-----------------------
+
+// -----------ProtoInfoTCP stuff starts---------------------
+pub const CTA_PROTOINFO_TCP_STATE: u16 = 1;
+pub const CTA_PROTOINFO_TCP_WSCALE_ORIGINAL: u16 = 2;
+pub const CTA_PROTOINFO_TCP_WSCALE_REPLY: u16 = 3;
+pub const CTA_PROTOINFO_TCP_FLAGS_ORIGINAL: u16 = 4;
+pub const CTA_PROTOINFO_TCP_FLAGS_REPLY: u16 = 5;
+
+#[derive(PartialEq, Debug)]
+pub enum ProtoInfoTCP {
+    State(u8),               // Corresponds to CTA_PROTOINFO_TCP_STATE
+    OriginalWindowScale(u8), // Corresponds to CTA_PROTOINFO_TCP_WSCALE_ORIGINAL
+    ReplyWindowScale(u8),    // Corresponds to CTA_PROTOINFO_TCP_WSCALE_REPLY
+    OriginalFlags(u16),      // Corresponds to CTA_PROTOINFO_TCP_FLAGS_ORIGINAL
+    ReplyFlags(u16),         // Corresponds to CTA_PROTOINFO_TCP_FLAGS_REPLY
+}
+impl Nla for ProtoInfoTCP {
+    fn value_len(&self) -> usize {
+        match self {
+            ProtoInfoTCP::State(v) => size_of_val(v),
+            ProtoInfoTCP::OriginalWindowScale(v) => size_of_val(v),
+            ProtoInfoTCP::ReplyWindowScale(v) => size_of_val(v),
+            ProtoInfoTCP::OriginalFlags(v) => size_of_val(v),
+            ProtoInfoTCP::ReplyFlags(v) => size_of_val(v),
+        }
+    }
+
+    fn kind(&self) -> u16 {
+        match self {
+            ProtoInfoTCP::State(_) => CTA_PROTOINFO_TCP_STATE,
+            ProtoInfoTCP::OriginalWindowScale(_) => CTA_PROTOINFO_TCP_WSCALE_ORIGINAL,
+            ProtoInfoTCP::ReplyWindowScale(_) => CTA_PROTOINFO_TCP_WSCALE_REPLY,
+            ProtoInfoTCP::OriginalFlags(_) => CTA_PROTOINFO_TCP_FLAGS_ORIGINAL,
+            ProtoInfoTCP::ReplyFlags(_) => CTA_PROTOINFO_TCP_FLAGS_REPLY,
+        }
+    }
+
+    fn emit_value(&self, buffer: &mut [u8]) {
+        match self {
+            ProtoInfoTCP::State(v) => buffer[0] = *v,
+            ProtoInfoTCP::OriginalWindowScale(v) => buffer[0] = *v,
+            ProtoInfoTCP::ReplyWindowScale(v) => buffer[0] = *v,
+            ProtoInfoTCP::OriginalFlags(v) => emit_u16(buffer, *v).unwrap(),
+            ProtoInfoTCP::ReplyFlags(v) => emit_u16(buffer, *v).unwrap(),
+        }
+    }
+}
+impl<'a, T: AsRef<[u8]> + ?Sized> Parseable<NlaBuffer<&'a T>> for ProtoInfoTCP {
+    fn parse(buf: &NlaBuffer<&'a T>) -> Result<Self, DecodeError> {
+        let payload = buf.value();
+
+        Ok(match buf.kind() {
+            CTA_PROTOINFO_TCP_STATE => ProtoInfoTCP::State(
+                parse_u8(payload).context("invalid CTA_PROTOINFO_TCP_STATE value")?,
+            ),
+            CTA_PROTOINFO_TCP_WSCALE_ORIGINAL => ProtoInfoTCP::OriginalWindowScale(
+                parse_u8(payload).context("invalid CTA_PROTOINFO_TCP_WSCALE_ORIGINAL value")?,
+            ),
+            CTA_PROTOINFO_TCP_WSCALE_REPLY => ProtoInfoTCP::ReplyWindowScale(
+                parse_u8(payload).context("invalid CTA_PROTOINFO_TCP_WSCALE_REPLY value")?,
+            ),
+            CTA_PROTOINFO_TCP_FLAGS_ORIGINAL => ProtoInfoTCP::OriginalFlags(
+                parse_u16(payload).context("invalid CTA_PROTOINFO_TCP_FLAGS_ORIGINAL value")?,
+            ),
+            CTA_PROTOINFO_TCP_FLAGS_REPLY => ProtoInfoTCP::ReplyFlags(
+                parse_u16(payload).context("invalid CTA_PROTOINFO_TCP_FLAGS_REPLY value")?,
+            ),
+            kind => {
+                return Err(DecodeError::from(format!(
+                    "invalid ProtoInfoTCP NLA kind: {}",
+                    kind
+                )));
+            }
+        })
+    }
+}
+// -----------ProtoInfoTCP stuff ends---------------------
+
 fn main() {
     let src_addr = IPTuple::SourceAddress(IpAddr::V4("10.0.42.55".parse().unwrap()));
     let dst_addr = IPTuple::DestinationAddress(IpAddr::V4("172.64.148.235".parse().unwrap()));
@@ -411,10 +564,12 @@ fn main() {
     let ip_tuple = Tuple::Ip(vec![src_addr, dst_addr]);
     let proto_tuple = Tuple::Proto(vec![proto_num, src_port, dst_port]);
 
-    let nlas = vec![ConntrackAttribute::CtaTupleOrig(vec![
-        ip_tuple,
-        proto_tuple,
-    ])];
+    let proto_info = ProtoInfo::TCP(vec![]);
+
+    let nlas = vec![
+        ConntrackAttribute::CtaTupleOrig(vec![ip_tuple, proto_tuple]),
+        ConntrackAttribute::CtaProtoInfo(vec![]),
+    ];
 
     let conntrack_get_message = NetfilterMessage::ConntrackGet {
         header: (Nfgenmsg {
