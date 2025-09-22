@@ -2,7 +2,7 @@ use std::net::IpAddr;
 
 use crate::{
     ConntrackAttribute, IPTuple, NetfilterMessage, Nfgenmsg, ProtoInfo, ProtoInfoTCP, ProtoTuple,
-    Tuple,
+    TCPFlags, Tuple,
 };
 use netlink_packet_core::{NLM_F_DUMP, NLM_F_REQUEST, NetlinkMessage};
 
@@ -74,8 +74,14 @@ fn test_get_conntrack() {
     let proto_tuple = Tuple::Proto(vec![proto_num, src_port, dst_port]);
 
     let proto_info = ProtoInfo::TCP(vec![
-        ProtoInfoTCP::OriginalFlags(2570),
-        ProtoInfoTCP::ReplyFlags(2570),
+        ProtoInfoTCP::OriginalFlags(TCPFlags {
+            flags: 10,
+            mask: 10,
+        }),
+        ProtoInfoTCP::ReplyFlags(TCPFlags {
+            flags: 10,
+            mask: 10,
+        }),
     ]);
 
     let nlas = vec![

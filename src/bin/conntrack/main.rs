@@ -488,8 +488,8 @@ pub enum ProtoInfoTCP {
     State(u8),               // Corresponds to CTA_PROTOINFO_TCP_STATE
     OriginalWindowScale(u8), // Corresponds to CTA_PROTOINFO_TCP_WSCALE_ORIGINAL
     ReplyWindowScale(u8),    // Corresponds to CTA_PROTOINFO_TCP_WSCALE_REPLY
-    OriginalFlags(u16),      // Corresponds to CTA_PROTOINFO_TCP_FLAGS_ORIGINAL
-    ReplyFlags(u16),         // Corresponds to CTA_PROTOINFO_TCP_FLAGS_REPLY
+    OriginalFlags(TCPFlags), // Corresponds to CTA_PROTOINFO_TCP_FLAGS_ORIGINAL
+    ReplyFlags(TCPFlags),    // Corresponds to CTA_PROTOINFO_TCP_FLAGS_REPLY
 }
 impl Nla for ProtoInfoTCP {
     fn value_len(&self) -> usize {
@@ -497,8 +497,8 @@ impl Nla for ProtoInfoTCP {
             ProtoInfoTCP::State(v) => size_of_val(v),
             ProtoInfoTCP::OriginalWindowScale(v) => size_of_val(v),
             ProtoInfoTCP::ReplyWindowScale(v) => size_of_val(v),
-            ProtoInfoTCP::OriginalFlags(v) => size_of_val(v),
-            ProtoInfoTCP::ReplyFlags(v) => size_of_val(v),
+            ProtoInfoTCP::OriginalFlags(v) => v.buffer_len(),
+            ProtoInfoTCP::ReplyFlags(v) => v.buffer_len(),
         }
     }
 
@@ -517,8 +517,8 @@ impl Nla for ProtoInfoTCP {
             ProtoInfoTCP::State(v) => buffer[0] = *v,
             ProtoInfoTCP::OriginalWindowScale(v) => buffer[0] = *v,
             ProtoInfoTCP::ReplyWindowScale(v) => buffer[0] = *v,
-            ProtoInfoTCP::OriginalFlags(v) => emit_u16(buffer, *v).unwrap(),
-            ProtoInfoTCP::ReplyFlags(v) => emit_u16(buffer, *v).unwrap(),
+            ProtoInfoTCP::OriginalFlags(v) => v.emit(buffer),
+            ProtoInfoTCP::ReplyFlags(v) => v.emit(buffer),
         }
     }
 }
@@ -537,10 +537,12 @@ impl<'a, T: AsRef<[u8]> + ?Sized> Parseable<NlaBuffer<&'a T>> for ProtoInfoTCP {
                 parse_u8(payload).context("invalid CTA_PROTOINFO_TCP_WSCALE_REPLY value")?,
             ),
             CTA_PROTOINFO_TCP_FLAGS_ORIGINAL => ProtoInfoTCP::OriginalFlags(
-                parse_u16(payload).context("invalid CTA_PROTOINFO_TCP_FLAGS_ORIGINAL value")?,
+                TCPFlags::parse(&TCPFlagsBuffer::new(payload))
+                    .context("invalid CTA_PROTOINFO_TCP_FLAGS_ORIGINAL value")?,
             ),
             CTA_PROTOINFO_TCP_FLAGS_REPLY => ProtoInfoTCP::ReplyFlags(
-                parse_u16(payload).context("invalid CTA_PROTOINFO_TCP_FLAGS_REPLY value")?,
+                TCPFlags::parse(&TCPFlagsBuffer::new(payload))
+                    .context("invalid CTA_PROTOINFO_TCP_FLAGS_REPLY value")?,
             ),
             kind => {
                 return Err(DecodeError::from(format!(
@@ -552,6 +554,39 @@ impl<'a, T: AsRef<[u8]> + ?Sized> Parseable<NlaBuffer<&'a T>> for ProtoInfoTCP {
     }
 }
 // -----------ProtoInfoTCP stuff ends---------------------
+// -----------TCPFlags stuff starts---------------------
+#[derive(PartialEq, Debug)]
+#[non_exhaustive]
+pub struct TCPFlags {
+    flags: u8,
+    mask: u8,
+}
+const TCP_FLAGS_LEN: usize = 2;
+buffer!(TCPFlagsBuffer(TCP_FLAGS_LEN) {
+    flags: (u8, 0),
+    mask: (u8, 1),
+});
+impl<T: AsRef<[u8]>> Parseable<TCPFlagsBuffer<T>> for TCPFlags {
+    fn parse(buf: &TCPFlagsBuffer<T>) -> Result<Self, DecodeError> {
+        Ok(TCPFlags {
+            flags: buf.flags(),
+            mask: buf.mask(),
+        })
+    }
+}
+
+impl Emitable for TCPFlags {
+    fn buffer_len(&self) -> usize {
+        TCP_FLAGS_LEN
+    }
+
+    fn emit(&self, buffer: &mut [u8]) {
+        let mut buffer = TCPFlagsBuffer::new(buffer);
+        buffer.set_flags(self.flags);
+        buffer.set_mask(self.mask);
+    }
+}
+// -----------TCPFlags stuff ends---------------------
 
 fn main() {
     let src_addr = IPTuple::SourceAddress(IpAddr::V4("10.0.42.55".parse().unwrap()));
